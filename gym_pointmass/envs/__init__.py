@@ -1,0 +1,1 @@
+from gym_pointmass.envs.point_mass import PointMassEnv
