@@ -23,7 +23,7 @@ class PointMassEnv(MultitaskEnv):
         self.action_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
 
         self.agent_position = self._get_random_point()
-        self.current_goal = None
+        self.goal_index = None
         self.goals = self._init_goals(n)
 
     def _init_goals(self, num_goals):
@@ -33,15 +33,37 @@ class PointMassEnv(MultitaskEnv):
         ex: for `num_goals` == 4 --> returns [(1, 0), (0, 1), (-1, 0), (0, -1)]
         """
         degrees = np.arange(0, 2 * math.pi, 2 * math.pi / num_goals)
-        pts = np.column_stack(np.cos(degrees), np.sin(degrees))
+        pts = np.column_stack((np.cos(degrees), np.sin(degrees)))
         return pts.round(4) # 4 significant figures
 
     def _get_random_point(self):
         """Returns a random point (x, y, ...) in the space [-1, 1]^dim"""
         return 2 * np.random.rand(self.dimension) - 1
 
+    def _get_observation(self):
+        return {
+            "observation": self.agent_position,
+            "desired_goal": self.get_goal(),
+            "achieved_goal": self.agent_position
+        }
+
+    def _get_info(self):
+        pass
+
     def step(self, action):
-        """Adds action, which should be a n-dimensional vector, to the current agent"""
+        """Adds action, which should be a n-dimensional vector, to the current agent."""
+        action = np.array(action)
+        assert len(action) == self.dimension, "Dimension of action does not align, expected" \
+                                              " ({0},) but got {1}".format(self.dimension, action.shape)
+
+        # Move the agent.
+        self.agent_position += action
+
+        obs = self._get_observation()
+        reward = self.compute_reward(action, obs)
+        info = self._get_info()
+        done = True
+        return obs, reward, done, info
 
     def reset(self):
         """
@@ -52,24 +74,24 @@ class PointMassEnv(MultitaskEnv):
         """
         self.agent_position = self._get_random_point()
         goal = self.sample_goal()
-        self.current_goal = goal["state_desired_goal"]
-        return {
-            "observation": self.agent_position,
-            "desired_goal": self.current_goal,
-            "achieved_goal": self.agent_position
-        }
+        self.goal_index = goal["goal_index"]
+        return self._get_observation()
 
     def render(self, mode='human'):
         pass
 
-    def close(self):
-        pass
-
     def get_goal(self):
-        pass
+        return self.goals[self.goal_index]
 
     def sample_goals(self, batch_size):
-        return { "state_desired_goal": np.random.choice(self.goals, batch_size) }
+        return { "goal_index": np.random.choice(range(len(self.goals)), batch_size, replace=False) }
 
     def compute_rewards(self, actions, obs):
-        pass
+        achieved_goals = obs['achieved_goal']
+        desired_goals = obs['desired_goal']
+
+        # Reward is the negative L2-norm. Want to maximize the negative distance -->
+        # minimizing distance from the goal.
+        r = -np.linalg.norm(achieved_goals - desired_goals, axis=1)
+
+        return r
