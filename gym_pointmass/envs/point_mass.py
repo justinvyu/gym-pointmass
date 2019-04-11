@@ -7,6 +7,7 @@ from gym.utils import seeding
 from gym.spaces import Box
 import numpy as np
 import math
+import matplotlib.pyplot as plt
 
 class PointMassEnv(MultitaskEnv):
     metadata = {'render.modes': ['human']}
@@ -78,7 +79,16 @@ class PointMassEnv(MultitaskEnv):
         return self._get_observation()
 
     def render(self, mode='human'):
-        pass
+        plt.clf()
+        pts = np.array([
+            self.agent_position,
+            self.get_goal()
+        ])
+        plt.scatter(self.agent_position[0], self.agent_position[1], color='r')
+        plt.scatter(self.get_goal()[0], self.get_goal()[1], color='g')
+        plt.xlim(-1, 1)
+        plt.ylim(-1, 1)
+        plt.show()
 
     def get_goal(self):
         return self.goals[self.goal_index]
