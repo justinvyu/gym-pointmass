@@ -22,12 +22,16 @@ class PointMassEnv(MultitaskEnv):
     def __init__(self,
                  dimension=2,
                  n=1,
-                 reward_type=PointMassEnvRewardType.DISTANCE):
+                 reward_type=PointMassEnvRewardType.DISTANCE,
+                 max_time_steps=100,
+                 epsilon=1e-4):
         MultitaskEnv.__init__(self)
 
         self.dimension = dimension
         self.num_goals = n
         self.reward_type = reward_type
+        self.max_time_steps = max_time_steps
+        self.epsilon = epsilon
 
         # Observation is a 2D vector (the x/y coordinates of the agent)
         self.observation_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
@@ -37,6 +41,7 @@ class PointMassEnv(MultitaskEnv):
         self.agent_position = self._get_random_point()
         self.goal_index = None
         self.goals = self._init_goals(n)
+        self.steps = 0
 
     def _init_goals(self, num_goals):
         """Generates `num_goals` goal points, distributed evenly along the unit circle.
@@ -106,7 +111,8 @@ class PointMassEnv(MultitaskEnv):
         obs = self._get_observation()
         reward = self.compute_reward(action, obs)
         info = self._get_info()
-        done = True
+        self.steps += 1
+        done = self.steps >= self.max_timesteps
         return obs, reward, done, info
 
     def reset(self):
@@ -143,9 +149,17 @@ class PointMassEnv(MultitaskEnv):
         achieved_goals = obs['achieved_goal']
         desired_goals = obs['desired_goal']
 
-        # Reward is the negative L2-norm. Want to maximize the negative distance -->
-        # minimizing distance from the goal.
-        r = -np.linalg.norm(achieved_goals - desired_goals, axis=1)
+        dist = np.linalg.norm(achieved_goals - desired_goals, axis=1)
+
+        if self.reward_type == PointMassEnvRewardType.DISTANCE:
+            # Reward is the negative L2-norm. Want to maximize the negative distance -->
+            # minimizing distance from the goal.
+            r = -dist
+        elif self.reward_type == PointMassEnvRewardType.SPARSE:
+            # Reward in this case is -1 if the agent's position is not within some
+            # radius `epsilon` from the goal point. 0 if the agent's position is
+            # near the goal.
+            r = -(dist > self.epsilon).astype(int)
 
         return r
 
