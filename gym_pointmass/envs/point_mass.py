@@ -4,11 +4,12 @@ from gym import GoalEnv
 from multiworld.core.multitask_env import MultitaskEnv
 from gym import error, spaces, utils
 from gym.utils import seeding
-from gym.spaces import Box
+from gym.spaces import Box, Dict
 import numpy as np
 import math
 import matplotlib.pyplot as plt
 from enum import Enum
+from gym_pointmass.core.utils import encode_one_hot
 
 class PointMassEnvRewardType(Enum):
     DISTANCE = 1
@@ -34,9 +35,15 @@ class PointMassEnv(MultitaskEnv):
         self.epsilon = epsilon
 
         # Observation is a 2D vector (the x/y coordinates of the agent)
-        self.observation_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
+        self.obs_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
         # Action is a 2D vector, representing the how far/in what direction the agent moves.
         self.action_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
+        self.goal_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
+
+        self.observation_space = Dict({
+            "observation": self.obs_space,
+            "desired_goal": self.goal_space
+        })
 
         self.agent_position = self._get_random_point()
         self.goal_index = None
@@ -88,15 +95,28 @@ class PointMassEnv(MultitaskEnv):
         old_x, old_y = self.agent_position[0], self.agent_position[1]
         act_x, act_y = action[0], action[1]
 
-        # If x/y goes out of bounds [-1, 1]:
-        if np.abs(new_y) > 1 and np.abs(new_y - old_y) >= np.abs(new_x - old_x):
-            scale = (1 - np.abs(old_y)) / np.abs(new_y - old_y)
-            new_x = old_x + scale * act_x
-            new_y = 1.0 if new_y > 1 else -1
-        elif np.abs(new_x) > 1:
-            scale = (1 - np.abs(old_x)) / np.abs(new_x - old_x)
-            new_y = old_y + scale * act_y
-            new_x = 1.0 if new_x > 1 else -1
+        if act_y == 0:  # Moving left/right
+            new_x = min(new_x, 1) if new_x > 1 else max(-1, new_x)
+        elif act_x == 0: # Moving up/down
+            new_y = min(new_y, 1) if new_y > 1 else max(-1, new_y)
+        elif np.abs(new_x) > 1 or np.abs(new_y) > 1:
+            check_x, check_y = None, None
+            if act_x > 0 and act_y > 0: # NE direction
+                check_x, check_y = 1, 1
+            elif act_x > 0 and act_y < 0: # SE direction
+                check_x, check_y = 1, -1
+            elif act_x < 0 and act_y < 0: # SW direction
+                check_x, check_y = -1, -1
+            elif act_x < 0 and act_y > 0: # NW direction
+                check_x, check_y = -1, 1
+
+            slope = act_y / act_x
+            intersect_x = (slope * old_x + check_y - old_y) / slope
+            intersect_y = slope * (check_x - old_x) + old_y
+            if np.abs(intersect_x) <= 1:
+                new_x, new_y = intersect_x, check_y
+            elif np.abs(intersect_y) <= 1:
+                new_x, new_y = check_x, intersect_y
 
         self.agent_position = np.array([new_x, new_y])
         return self.agent_position
@@ -112,7 +132,7 @@ class PointMassEnv(MultitaskEnv):
         reward = self.compute_reward(action, obs)
         info = self._get_info()
         self.steps += 1
-        done = self.steps >= self.max_timesteps
+        done = self.steps >= self.max_time_steps
         return obs, reward, done, info
 
     def reset(self):
@@ -122,6 +142,7 @@ class PointMassEnv(MultitaskEnv):
         2. Samples a goal position.
         3. Returns the dictionary containing the new observation and the (sampled) goal.
         """
+        self.steps = 0
         self.agent_position = self._get_random_point()
         goal = self.sample_goal()
         self.goal_index = goal["goal_index"]
@@ -129,10 +150,6 @@ class PointMassEnv(MultitaskEnv):
 
     def render(self, mode='human'):
         plt.clf()
-        pts = np.array([
-            self.agent_position,
-            self.get_goal()
-        ])
         plt.scatter(self.agent_position[0], self.agent_position[1], color='r')
         plt.scatter(self.get_goal()[0], self.get_goal()[1], color='g')
         plt.xlim(-1, 1)
@@ -140,16 +157,21 @@ class PointMassEnv(MultitaskEnv):
         plt.show()
 
     def get_goal(self):
-        return self.goals[self.goal_index]
+        return encode_one_hot(self.num_goals, self.goal_index)
 
     def sample_goals(self, batch_size):
-        return { "goal_index": np.random.choice(range(len(self.goals)), batch_size, replace=False) }
+        rand_goal_index = np.random.choice(range(len(self.goals)), batch_size, replace=False)
+
+        return {
+            "goal_index": rand_goal_index
+        }
 
     def compute_rewards(self, actions, obs):
         achieved_goals = obs['achieved_goal']
         desired_goals = obs['desired_goal']
 
-        dist = np.linalg.norm(achieved_goals - desired_goals, axis=1)
+        goal_index = np.argmax(desired_goals)
+        dist = np.linalg.norm(achieved_goals - self.goals[goal_index], axis=1)
 
         if self.reward_type == PointMassEnvRewardType.DISTANCE:
             # Reward is the negative L2-norm. Want to maximize the negative distance -->
@@ -178,9 +200,16 @@ if __name__ == "__main__":
 
     env2 = PointMassEnv()
     env2.reset()
-    env2.agent_position = np.array([-1., 0.])
-    env2.step(np.array([2, 2]))
+    env2.agent_position = np.array([1., 0.8])
+    env2.step(np.array([0.5, 0.5]))
     print(env2.agent_position)
-    env2.step(np.array([2, -2]))
+    env2.step(np.array([0.5, 0.5]))
     print(env2.agent_position)
+    env2.step(np.array([0, -2]))
+    print(env2.agent_position)
+    env2.step(np.array([-3, 3]))
+    print(env2.agent_position)
+    env2.step(np.array([1, -4]))
+    print(env2.agent_position)
+
 
