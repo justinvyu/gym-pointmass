@@ -25,7 +25,8 @@ class PointMassEnv(MultitaskEnv):
                  n=1,
                  reward_type=PointMassEnvRewardType.DISTANCE,
                  max_time_steps=100,
-                 epsilon=1e-4):
+                 epsilon=1e-2,
+                 goal_distance=5.):
         MultitaskEnv.__init__(self)
 
         self.dimension = dimension
@@ -33,12 +34,14 @@ class PointMassEnv(MultitaskEnv):
         self.reward_type = reward_type
         self.max_time_steps = max_time_steps
         self.epsilon = epsilon
+        self.goal_distance = goal_distance
+        self.bound = 1.25 * goal_distance
 
         # Observation is a 2D vector (the x/y coordinates of the agent)
         self.obs_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
         # Action is a 2D vector, representing the how far/in what direction the agent moves.
         self.action_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
-        self.goal_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
+        self.goal_space = Box(low=0, high=1, shape=(n,), dtype=np.float32)
 
         self.observation_space = Dict({
             "observation": self.obs_space,
@@ -57,12 +60,13 @@ class PointMassEnv(MultitaskEnv):
         ex: for `num_goals` == 4 --> returns [(1, 0), (0, 1), (-1, 0), (0, -1)]
         """
         degrees = np.arange(0, 2 * math.pi, 2 * math.pi / num_goals)
-        pts = np.column_stack((np.cos(degrees), np.sin(degrees)))
+        pts = np.column_stack((self.goal_distance * np.cos(degrees),
+                               self.goal_distance * np.sin(degrees)))
         return pts.round(4) # 4 significant figures
 
     def _get_random_point(self):
         """Returns a random point (x, y, ...) in the space [-1, 1]^dim"""
-        return 2 * np.random.rand(self.dimension) - 1
+        return 2 * self.bound * np.random.rand(self.dimension) - self.bound
 
     def _get_observation(self):
         return {
@@ -95,27 +99,29 @@ class PointMassEnv(MultitaskEnv):
         old_x, old_y = self.agent_position[0], self.agent_position[1]
         act_x, act_y = action[0], action[1]
 
+        bound_x, bound_y = self.bound, self.bound
+
         if act_y == 0:  # Moving left/right
-            new_x = min(new_x, 1) if new_x > 1 else max(-1, new_x)
+            new_x = min(new_x, bound_x) if new_x > bound_x else max(-bound_x, new_x)
         elif act_x == 0: # Moving up/down
-            new_y = min(new_y, 1) if new_y > 1 else max(-1, new_y)
-        elif np.abs(new_x) > 1 or np.abs(new_y) > 1:
+            new_y = min(new_y, bound_y) if new_y > bound_y else max(-bound_y, new_y)
+        elif np.abs(new_x) > bound_x or np.abs(new_y) > bound_y:
             check_x, check_y = None, None
             if act_x > 0 and act_y > 0: # NE direction
-                check_x, check_y = 1, 1
+                check_x, check_y = bound_x, bound_y
             elif act_x > 0 and act_y < 0: # SE direction
-                check_x, check_y = 1, -1
+                check_x, check_y = bound_x, -bound_y
             elif act_x < 0 and act_y < 0: # SW direction
-                check_x, check_y = -1, -1
+                check_x, check_y = -bound_x, -bound_y
             elif act_x < 0 and act_y > 0: # NW direction
-                check_x, check_y = -1, 1
+                check_x, check_y = -bound_x, bound_y
 
             slope = act_y / act_x
             intersect_x = (slope * old_x + check_y - old_y) / slope
             intersect_y = slope * (check_x - old_x) + old_y
-            if np.abs(intersect_x) <= 1:
+            if np.abs(intersect_x) <= bound_x:
                 new_x, new_y = intersect_x, check_y
-            elif np.abs(intersect_y) <= 1:
+            elif np.abs(intersect_y) <= bound_y:
                 new_x, new_y = check_x, intersect_y
 
         self.agent_position = np.array([new_x, new_y])
@@ -185,6 +191,17 @@ class PointMassEnv(MultitaskEnv):
 
         return r
 
+class ClippedPointMassEnv(PointMassEnv):
+    def __init__(self, action_clip_length, *args, **kwargs):
+        super(ClippedPointMassEnv, self).__init__(*args, **kwargs)
+        self.action_clip_length = action_clip_length
+
+    def step(self, action):
+        a = np.array(action)
+        if np.linalg.norm(a) > self.action_clip_length:
+            a = self.action_clip_length * a / np.linalg.norm(a)
+        return super(ClippedPointMassEnv, self).step(a)
+
 if __name__ == "__main__":
     # env = PointMassEnv()
     # env.reset()
@@ -198,18 +215,44 @@ if __name__ == "__main__":
     # env.step(np.array([0, 100.0]))
     # print(env.agent_position)
 
-    env2 = PointMassEnv()
-    env2.reset()
-    env2.agent_position = np.array([1., 0.8])
-    env2.step(np.array([0.5, 0.5]))
-    print(env2.agent_position)
-    env2.step(np.array([0.5, 0.5]))
-    print(env2.agent_position)
-    env2.step(np.array([0, -2]))
-    print(env2.agent_position)
-    env2.step(np.array([-3, 3]))
-    print(env2.agent_position)
-    env2.step(np.array([1, -4]))
-    print(env2.agent_position)
+    # Test 2 - Diagonal
 
+    # env2 = PointMassEnv()
+    # obs = env2.reset()
+    # print(obs)
+    # env2.agent_position = np.array([1., 0.8])
+    # env2.step(np.array([0.5, 0.5]))
+    # print(env2.agent_position)
+    # env2.step(np.array([0.5, 0.5]))
+    # print(env2.agent_position)
+    # env2.step(np.array([0, -2]))
+    # print(env2.agent_position)
+    # env2.step(np.array([-3, 3]))
+    # print(env2.agent_position)
+    # env2.step(np.array([1, -4]))
+    # print(env2.agent_position)
+
+    env = PointMassEnv()
+    obs = env.reset()
+    print(obs)
+    env.agent_position = np.array([0, 0])
+    plt.figure(figsize=(8, 8))
+    env.step(np.array([1000, 0]))
+    print(env.agent_position)
+    for _ in range(100):
+        obs = env.reset()
+        pt = obs["observation"]
+        plt.scatter(pt[0], pt[1])
+
+    plt.show()
+
+    # Test 3 - Clipped Environment
+
+    # env3 = ClippedPointMassEnv(action_clip_length=0.1)
+    # obs = env3.reset()
+    # env3.agent_position = np.array([0., 0.])
+    # env3.step(np.array([1, 1]))
+    # print(env3.agent_position) # Should clip to norm = 0.1 [0.07071068 0.07071068]
+    # env3.step(np.array([-0.1, -0.1]))
+    # print(env3.agent_position) # Should be back at origin.
 
