@@ -14,6 +14,7 @@ from gym_pointmass.core.utils import encode_one_hot
 class PointMassEnvRewardType(Enum):
     DISTANCE = 1
     SPARSE = 2
+    SEMI_SPARSE = 3
 
 class PointMassEnv(MultitaskEnv):
     """Implementation of a 2D PointMass environment."""
@@ -188,6 +189,14 @@ class PointMassEnv(MultitaskEnv):
             # radius `epsilon` from the goal point. 0 if the agent's position is
             # near the goal.
             r = -(dist > self.epsilon).astype(int)
+        elif self.reward_type == PointMassEnvRewardType.SEMI_SPARSE:
+            # Reward is -1 if the agent's position is not within (0.5 * self.goal_distance)
+            # Reward within the radius is a normalized value between [-1, 0], where
+            # -1 represents at the radius, and 0 represents exactly the goal point.
+            rad = 0.5 * self.goal_distance
+            dist[dist < rad] /= -rad
+            dist[dist > rad] = -1
+            r = dist
 
         return r
 
@@ -203,17 +212,17 @@ class ClippedPointMassEnv(PointMassEnv):
         return super(ClippedPointMassEnv, self).step(a)
 
 if __name__ == "__main__":
-    # env = PointMassEnv()
-    # env.reset()
-    # env.agent_position = np.array([0, 0])
-    # env.step(np.array([0.5, 0.5]))
+    env = PointMassEnv(reward_type=PointMassEnvRewardType.SEMI_SPARSE)
+    env.reset()
+    env.agent_position = np.array([0, 0])
+    print(env.step(np.array([4.5, 0.])))
     # print(env.agent_position)
-    # env.step(np.array([0.2, 0.1]))
-    # print(env.agent_position)
-    # env.step(np.array([1.0, 1.0]))
-    # print(env.agent_position)
-    # env.step(np.array([0, 100.0]))
-    # print(env.agent_position)
+    env.step(np.array([0.2, 0.1]))
+    print(env.agent_position)
+    env.step(np.array([1.0, 1.0]))
+    print(env.agent_position)
+    env.step(np.array([0, 100.0]))
+    print(env.agent_position)
 
     # Test 2 - Diagonal
 
@@ -232,19 +241,19 @@ if __name__ == "__main__":
     # env2.step(np.array([1, -4]))
     # print(env2.agent_position)
 
-    env = PointMassEnv()
-    obs = env.reset()
-    print(obs)
-    env.agent_position = np.array([0, 0])
-    plt.figure(figsize=(8, 8))
-    env.step(np.array([1000, 0]))
-    print(env.agent_position)
-    for _ in range(100):
-        obs = env.reset()
-        pt = obs["observation"]
-        plt.scatter(pt[0], pt[1])
-
-    plt.show()
+    # env = PointMassEnv()
+    # obs = env.reset()
+    # print(obs)
+    # env.agent_position = np.array([0, 0])
+    # plt.figure(figsize=(8, 8))
+    # env.step(np.array([1000, 0]))
+    # print(env.agent_position)
+    # for _ in range(100):
+    #     obs = env.reset()
+    #     pt = obs["observation"]
+    #     plt.scatter(pt[0], pt[1])
+    #
+    # plt.show()
 
     # Test 3 - Clipped Environment
 
