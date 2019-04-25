@@ -1,9 +1,5 @@
 
-import gym
-from gym import GoalEnv
 from multiworld.core.multitask_env import MultitaskEnv
-from gym import error, spaces, utils
-from gym.utils import seeding
 from gym.spaces import Box, Dict
 import numpy as np
 import math
@@ -39,14 +35,15 @@ class PointMassEnv(MultitaskEnv):
         self.bound = 1.25 * goal_distance
 
         # Observation is a 2D vector (the x/y coordinates of the agent)
-        self.obs_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
+        self.obs_space = Box(low=-self.bound, high=self.bound, shape=(dimension,), dtype=np.float32)
         # Action is a 2D vector, representing the how far/in what direction the agent moves.
         self.action_space = Box(low=-1, high=1, shape=(dimension,), dtype=np.float32)
         self.goal_space = Box(low=0, high=1, shape=(n,), dtype=np.float32)
 
         self.observation_space = Dict({
             "observation": self.obs_space,
-            "desired_goal": self.goal_space
+            "desired_goal": self.goal_space,
+            "achieved_goal": self.goal_space
         })
 
         self.agent_position = self._get_random_point()
@@ -216,30 +213,12 @@ if __name__ == "__main__":
     env.reset()
     env.agent_position = np.array([0, 0])
     print(env.step(np.array([4.5, 0.])))
-    # print(env.agent_position)
     env.step(np.array([0.2, 0.1]))
     print(env.agent_position)
     env.step(np.array([1.0, 1.0]))
     print(env.agent_position)
     env.step(np.array([0, 100.0]))
     print(env.agent_position)
-
-    # Test 2 - Diagonal
-
-    # env2 = PointMassEnv()
-    # obs = env2.reset()
-    # print(obs)
-    # env2.agent_position = np.array([1., 0.8])
-    # env2.step(np.array([0.5, 0.5]))
-    # print(env2.agent_position)
-    # env2.step(np.array([0.5, 0.5]))
-    # print(env2.agent_position)
-    # env2.step(np.array([0, -2]))
-    # print(env2.agent_position)
-    # env2.step(np.array([-3, 3]))
-    # print(env2.agent_position)
-    # env2.step(np.array([1, -4]))
-    # print(env2.agent_position)
 
     # env = PointMassEnv()
     # obs = env.reset()
@@ -254,14 +233,4 @@ if __name__ == "__main__":
     #     plt.scatter(pt[0], pt[1])
     #
     # plt.show()
-
-    # Test 3 - Clipped Environment
-
-    # env3 = ClippedPointMassEnv(action_clip_length=0.1)
-    # obs = env3.reset()
-    # env3.agent_position = np.array([0., 0.])
-    # env3.step(np.array([1, 1]))
-    # print(env3.agent_position) # Should clip to norm = 0.1 [0.07071068 0.07071068]
-    # env3.step(np.array([-0.1, -0.1]))
-    # print(env3.agent_position) # Should be back at origin.
 
